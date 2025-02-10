@@ -25,19 +25,27 @@ data = pd.concat(data_list, ignore_index=True)
 data['time'] = pd.to_datetime(data['time'])
 data['time_of_day'] = data['time'].dt.hour
 
-def calculate_correction_insulin(row, target_glucose=120, correction_factor=45):
+data['normalized_heart_rate'] = (data['heart_rate'] - 60) / (180 - 60)
+
+def calculate_correction_insulin(row, target_glucose=120, correction_factor=50):
     correction = max(0, (row['glucose'] - target_glucose) / correction_factor)
     carb_effect = row.get('carb_input', 0) / 10
-    basal_effect = row.get('basal_rate', 0) / 2
+    basal_effect = row.get('basal_rate', 0)
     bolus_effect = row.get('bolus_volume_delivered', 0)
-    heart_rate_effect = (row['heart_rate'] / 100) * 0.5
-    steps_effect = (row['steps'] / 10000) * 0.5
-    calorie_effect = (row['calories'] / 200) * 0.3
-    return max(0, correction + carb_effect - basal_effect - bolus_effect - heart_rate_effect - steps_effect - calorie_effect)
+
+    heart_rate_effect = row['normalized_heart_rate']
+    calorie_effect = row['calories']
+
+    steps_effect = (row['steps'] / 10000) * 0.18
+
+    return max(0,
+               correction + carb_effect - basal_effect - bolus_effect - heart_rate_effect - steps_effect - calorie_effect)
+
 
 data['insulin_dose'] = data.apply(calculate_correction_insulin, axis=1)
 
-X = data[['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate', 'steps']].fillna(0)
+X = data[['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate',
+          'steps']].fillna(0)
 y = data['insulin_dose']
 
 scaler = StandardScaler()
@@ -55,7 +63,9 @@ models = {
 
 trained_models = {name: model.fit(X_train, y_train) for name, model in models.items()}
 
-results = {name: {"MSE": mean_squared_error(y_test, model.predict(X_test)), "R²": r2_score(y_test, model.predict(X_test))} for name, model in models.items()}
+results = {
+    name: {"MSE": mean_squared_error(y_test, model.predict(X_test)), "R²": r2_score(y_test, model.predict(X_test))} for
+    name, model in models.items()}
 results_df = pd.DataFrame(results).T
 print("Порівняння моделей за точністю:")
 print(results_df)
@@ -76,7 +86,9 @@ os.makedirs("results", exist_ok=True)
 plt.savefig("results/result_algorithms.png")
 
 new_data = data.copy()
-X_new = new_data[['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate', 'steps']].fillna(0)
+X_new = new_data[
+    ['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate',
+     'steps']].fillna(0)
 X_new_scaled = scaler.transform(X_new)
 
 for name, model in models.items():
