@@ -1,100 +1,207 @@
 import os
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.linear_model import LinearRegression
 from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.compose import ColumnTransformer
 
-folder_path = "data/"
-all_files = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.csv')]
-data_list = []
+DATA_DIR = "data"
+RESULTS_DIR = "results"
+LAG_STEPS = 4
+WINDOW_SIZE = 12
 
-for file in all_files:
-    temp_data = pd.read_csv(file, delimiter=';')
-    temp_data['patient_id'] = os.path.basename(file).split('.')[0]
-    data_list.append(temp_data)
-
-data = pd.concat(data_list, ignore_index=True)
-data['time'] = pd.to_datetime(data['time'])
-data['time_of_day'] = data['time'].dt.hour
-
-data['normalized_heart_rate'] = (data['heart_rate'] - 60) / (180 - 60)
-
-def calculate_correction_insulin(row, target_glucose=120, correction_factor=50):
-    correction = max(0, (row['glucose'] - target_glucose) / correction_factor)
-    carb_effect = row.get('carb_input', 0) / 10
-    basal_effect = row.get('basal_rate', 0)
-    bolus_effect = row.get('bolus_volume_delivered', 0)
-
-    heart_rate_effect = row['normalized_heart_rate']
-    calorie_effect = row['calories']
-
-    steps_effect = (row['steps'] / 10000) * 0.18
-
-    return max(0,
-               correction + carb_effect - basal_effect - bolus_effect - heart_rate_effect - steps_effect - calorie_effect)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-data['insulin_dose'] = data.apply(calculate_correction_insulin, axis=1)
+def load_and_preprocess():
+    """Загрузка и предобработка данных"""
+    dfs = []
 
-X = data[['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate',
-          'steps']].fillna(0)
-y = data['insulin_dose']
+    for file in os.listdir(DATA_DIR):
+        if file.endswith('.csv'):
+            patient_id = file.split('.')[0]
+            df = pd.read_csv(os.path.join(DATA_DIR, file),
+                             delimiter=';',
+                             parse_dates=['time'])
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
 
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+            df = df.sort_values('time')
+            df['hour'] = df['time'].dt.hour
+            df['minute'] = df['time'].dt.minute
 
-models = {
-    "Linear Regression": LinearRegression(),
-    "SVM": SVR(kernel='rbf', C=1, gamma='scale'),
-    "KNN": KNeighborsRegressor(n_neighbors=5, weights='distance'),
-    "Random Forest": RandomForestRegressor(n_estimators=200, max_depth=15, random_state=42),
-    "Decision Tree": DecisionTreeRegressor(max_depth=8, random_state=42)
-}
 
-trained_models = {name: model.fit(X_train, y_train) for name, model in models.items()}
+            df['time_sin'] = np.sin(2 * np.pi * (df['hour'] * 60 + df['minute']) / (24 * 60))
+            df['time_cos'] = np.cos(2 * np.pi * (df['hour'] * 60 + df['minute']) / (24 * 60))
 
-results = {
-    name: {"MSE": mean_squared_error(y_test, model.predict(X_test)), "R²": r2_score(y_test, model.predict(X_test))} for
-    name, model in models.items()}
-results_df = pd.DataFrame(results).T
-print("Порівняння моделей за точністю:")
-print(results_df)
 
-plt.figure(figsize=(10, 6))
-sns.barplot(x=results_df.index, y=results_df["R²"])
-plt.title("Порівняння моделей за R²", fontsize=16)
-plt.ylabel("R² Score", fontsize=14)
-plt.xlabel("Algorithms", fontsize=14)
-plt.xticks(rotation=0, fontsize=12)
-plt.yticks(fontsize=12)
+            for lag in range(1, LAG_STEPS + 1):
+                df[f'glucose_lag_{lag}'] = df['glucose'].shift(lag)
+                df[f'carbs_lag_{lag}'] = df['carb_input'].shift(lag)
 
-for index, value in enumerate(results_df["R²"]):
-    plt.text(index, value + 0.005, f'{value:.4f}', ha='center', fontsize=12, color='black')
+            df['glucose_rolling'] = df['glucose'].rolling(WINDOW_SIZE).mean()
+            df['carbs_rolling'] = df['carb_input'].rolling(WINDOW_SIZE).sum()
 
-plt.tight_layout()
-os.makedirs("results", exist_ok=True)
-plt.savefig("results/result_algorithms.png")
+            df['patient_id'] = patient_id
+            dfs.append(df.dropna())
 
-new_data = data.copy()
-X_new = new_data[
-    ['glucose', 'calories', 'basal_rate', 'bolus_volume_delivered', 'carb_input', 'time_of_day', 'heart_rate',
-     'steps']].fillna(0)
-X_new_scaled = scaler.transform(X_new)
+    return pd.concat(dfs)
 
-for name, model in models.items():
-    new_data[f'insulin_dose_{name}'] = np.maximum(0, model.predict(X_new_scaled))
 
-patient_dose = new_data.groupby('patient_id')[[f'insulin_dose_{name}' for name in models.keys()]].mean()
-output_path = "results/new_insulin_doses_all_models.csv"
-patient_dose.to_csv(output_path, index=True)
-print(patient_dose)
+def prepare_data(df):
+    """Подготовка финального датасета"""
+    features = [
+        'glucose', 'carb_input', 'basal_rate',
+        'time_sin', 'time_cos',
+        'glucose_lag_1', 'glucose_lag_2',
+        'carbs_lag_1', 'carbs_lag_2',
+        'glucose_rolling', 'carbs_rolling'
+    ]
+
+    target = 'bolus_volume_delivered'
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), features)
+        ],
+        remainder='passthrough'
+    )
+
+    X = preprocessor.fit_transform(df[features])
+    y = df[target].values
+
+    return X, y, preprocessor
+
+
+def evaluate_models(X, y):
+    """Обучение и оценка всех моделей"""
+    models = {
+        "Linear Regression": LinearRegression(),
+        "SVM": SVR(kernel='rbf', C=1.0, epsilon=0.1),
+        "KNN": KNeighborsRegressor(n_neighbors=5, weights='distance'),
+        "Random Forest": RandomForestRegressor(n_estimators=200, max_depth=15, random_state=42),
+        "Decision Tree": DecisionTreeRegressor(max_depth=5, random_state=42)
+    }
+
+    tscv = TimeSeriesSplit(n_splits=3)
+    results = {name: {'MSE': [], 'R2': []} for name in models}
+
+    for train_idx, test_idx in tscv.split(X):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        for name, model in models.items():
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            y_pred = np.maximum(y_pred, 0)
+
+            results[name]['MSE'].append(mean_squared_error(y_test, y_pred))
+            results[name]['R2'].append(r2_score(y_test, y_pred))
+
+    final_results = {}
+    for name in models:
+        final_results[name] = {
+            'MSE': np.mean(results[name]['MSE']),
+            'R2': np.mean(results[name]['R2'])
+        }
+
+    return final_results
+
+
+def plot_metrics(results, patient_id):
+    """Визуализация метрик"""
+    df = pd.DataFrame(results).T.reset_index()
+    df.columns = ['Model', 'MSE', 'R2']
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+    sns.barplot(x='Model', y='MSE', data=df, ax=ax1, palette='Blues_d')
+    ax1.set_title(f'MSE Comparison for Patient {patient_id}')
+    ax1.set_ylabel('Mean Squared Error')
+    ax1.tick_params(axis='x', rotation=45)
+
+    sns.barplot(x='Model', y='R2', data=df, ax=ax2, palette='Greens_d')
+    ax2.set_title(f'R² Score Comparison for Patient {patient_id}')
+    ax2.set_ylabel('R² Score')
+    ax2.set_ylim(0, 1)
+    ax2.tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.savefig(f"{RESULTS_DIR}/metrics_{patient_id}.png")
+    plt.close()
+
+
+def main():
+    full_data = load_and_preprocess()
+    global_results = []
+
+    for pid in full_data['patient_id'].unique():
+        patient_data = full_data[full_data['patient_id'] == pid]
+
+        if len(patient_data) < 100:
+            continue
+
+        X, y, _ = prepare_data(patient_data)
+        results = evaluate_models(X, y)
+
+        for model_name, metrics in results.items():
+            global_results.append({
+                'Patient': pid,
+                'Model': model_name,
+                'MSE': metrics['MSE'],
+                'R2': metrics['R2']
+            })
+
+    results_df = pd.DataFrame(global_results)
+
+    agg_results = results_df.groupby('Model').agg({
+        'MSE': 'mean',
+        'R2': 'mean'
+    }).round(6).reset_index()
+
+    print("\nFinal Results:")
+    print(agg_results[['Model', 'MSE', 'R2']].to_string(index=False))
+
+    plt.figure(figsize=(14, 6))
+
+    plt.subplot(1, 2, 1)
+    sns.barplot(
+        x='Model',
+        y='MSE',
+        hue='Model',
+        data=agg_results,
+        palette='Blues',
+        legend=False
+    )
+    plt.title('Average MSE by Model')
+    plt.xticks(rotation=45)
+    plt.ylabel('MSE')
+
+    plt.subplot(1, 2, 2)
+    sns.barplot(
+        x='Model',
+        y='R2',
+        hue='Model',
+        data=agg_results,
+        palette='Greens',
+        legend=False
+    )
+    plt.title('Average R² Score by Model')
+    plt.xticks(rotation=45)
+    plt.ylabel('R² Score')
+    plt.ylim(0, 1)
+
+    plt.tight_layout()
+    plt.savefig(f"{RESULTS_DIR}/final_results.png")
+    plt.close()
+
+
+if __name__ == "__main__":
+    main()
