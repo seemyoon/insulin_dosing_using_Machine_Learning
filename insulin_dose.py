@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.linear_model import LinearRegression
 from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
@@ -32,22 +32,22 @@ def load_and_preprocess():
                              delimiter=';',
                              parse_dates=['time'])
 
-
             df = df.sort_values('time')
             df['hour'] = df['time'].dt.hour
             df['minute'] = df['time'].dt.minute
 
-
             df['time_sin'] = np.sin(2 * np.pi * (df['hour'] * 60 + df['minute']) / (24 * 60))
             df['time_cos'] = np.cos(2 * np.pi * (df['hour'] * 60 + df['minute']) / (24 * 60))
-
 
             for lag in range(1, LAG_STEPS + 1):
                 df[f'glucose_lag_{lag}'] = df['glucose'].shift(lag)
                 df[f'carbs_lag_{lag}'] = df['carb_input'].shift(lag)
+                df[f'basal_rate_lag_{lag}'] = df['basal_rate'].shift(lag)
 
             df['glucose_rolling'] = df['glucose'].rolling(WINDOW_SIZE).mean()
             df['carbs_rolling'] = df['carb_input'].rolling(WINDOW_SIZE).sum()
+            df['steps_rolling'] = df['steps'].rolling(WINDOW_SIZE).sum()
+            df['heart_rate_rolling'] = df['heart_rate'].rolling(WINDOW_SIZE).mean()
 
             df['patient_id'] = patient_id
             dfs.append(df.dropna())
@@ -58,14 +58,16 @@ def load_and_preprocess():
 def prepare_data(df):
     """Подготовка финального датасета"""
     features = [
-        'glucose', 'carb_input', 'basal_rate',
-        'time_sin', 'time_cos',
-        'glucose_lag_1', 'glucose_lag_2',
-        'carbs_lag_1', 'carbs_lag_2',
-        'glucose_rolling', 'carbs_rolling'
+        'glucose', 'carb_input', 'heart_rate', 'steps', 'time_sin', 'time_cos', 'bolus_volume_delivered',
     ]
 
-    target = 'bolus_volume_delivered'
+    features += [f'glucose_lag_{i}' for i in range(1, LAG_STEPS + 1)]
+    features += [f'carbs_lag_{i}' for i in range(1, LAG_STEPS + 1)]
+    features += [f'basal_rate_lag_{i}' for i in range(1, LAG_STEPS + 1)]
+
+    features += ['glucose_rolling', 'carbs_rolling', 'steps_rolling', 'heart_rate_rolling']
+
+    target = 'basal_rate'
 
     preprocessor = ColumnTransformer(
         transformers=[
@@ -81,24 +83,38 @@ def prepare_data(df):
 
 
 def evaluate_models(X, y):
-    """Обучение и оценка всех моделей"""
+    """Обучение и оценка всех моделей с настройкой гиперпараметров"""
     models = {
         "Linear Regression": LinearRegression(),
-        "SVM": SVR(kernel='rbf', C=1.0, epsilon=0.1),
-        "KNN": KNeighborsRegressor(n_neighbors=5, weights='distance'),
-        "Random Forest": RandomForestRegressor(n_estimators=200, max_depth=15, random_state=42),
-        "Decision Tree": DecisionTreeRegressor(max_depth=5, random_state=42)
+        "SVM": SVR(kernel='rbf', C=10.0, epsilon=0.1),
+        "KNN": KNeighborsRegressor(n_neighbors=7, weights='distance'),
+        "Random Forest": RandomForestRegressor(),
+        "Decision Tree": DecisionTreeRegressor(max_depth=10)
     }
 
     tscv = TimeSeriesSplit(n_splits=3)
     results = {name: {'MSE': [], 'R2': []} for name in models}
+
+    rf_param_grid = {
+        'n_estimators': [100, 200, 300],
+        'max_depth': [5, 10, 15, None],
+        'min_samples_split': [2, 5, 10],
+    }
+
+    rf_grid_search = RandomizedSearchCV(RandomForestRegressor(), rf_param_grid, n_iter=10, cv=3, random_state=42)
 
     for train_idx, test_idx in tscv.split(X):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
         for name, model in models.items():
-            model.fit(X_train, y_train)
+
+            if name == "Random Forest":
+                model = rf_grid_search
+                model.fit(X_train, y_train)
+            else:
+                model.fit(X_train, y_train)
+
             y_pred = model.predict(X_test)
             y_pred = np.maximum(y_pred, 0)
 
