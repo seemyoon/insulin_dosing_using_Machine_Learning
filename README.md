@@ -41,5 +41,11 @@ python -m models.svm_predict_dose
 python -m models.xgb_predict_dose
 ```
 
+### All models at once:
+```bash
+python -m plot_metrics.plot_metrics
+```
+
+
 ## Dataset
 Hidalgo, J. Ignacio; Alvarado, Jorge; Botella, Marta; Aramendi, Aranzazu; Velasco, J. Manuel; Garnica, Oscar (2024), “HUPA-UCM Diabetes Dataset”, Mendeley Data, V1, doi: [10.17632/3hbcscwz44.1](https://doi.org/10.17632/3hbcscwz44.1)

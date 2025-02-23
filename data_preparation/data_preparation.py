@@ -1,6 +1,8 @@
 import os
+
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+
 
 def load_and_prepare_data(folder_path):
     if not os.path.exists(folder_path):
