@@ -25,6 +25,9 @@ threadpoolctl = "*"
 tzdata = "*"
 catboost = "*"
 xgboost = "*"
+lightgbm = "*"
+tensorflow = "*"
+keras = "*"
 
 [dev-packages]
 

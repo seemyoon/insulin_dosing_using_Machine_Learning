@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from models.cb_predict_dose import predict_dose as cb_predict_dose
 from models.dt_predict_dose import predict_dose as dt_predict_dose
 from models.knn_predict_dose import predict_dose as knn_predict_dose
 from models.lr_predict_dose import predict_dose as lr_predict_dose
 from models.rf_predict_dose import predict_dose as rf_predict_dose
 from models.xgb_predict_dose import predict_dose as xgb_predict_dose
+from models.lgb_predict_dose import predict_dose as lgb_predict_dose
 
 
 def get_model_metrics(predict_function):
@@ -20,8 +20,9 @@ def get_model_metrics(predict_function):
 
 
 def plot_comparison():
-    models = ['Linear Regression', 'Decision Tree', 'Random Forest', 'KNN', 'CatBoost', 'XGBoost']
-    predict_functions = [lr_predict_dose, dt_predict_dose, rf_predict_dose, knn_predict_dose, cb_predict_dose, xgb_predict_dose]
+    models = ['Linear Regression', 'Decision Tree', 'Random Forest', 'KNN', 'XGBoost', 'LightGBM']
+    predict_functions = [lr_predict_dose, dt_predict_dose, rf_predict_dose, knn_predict_dose, xgb_predict_dose,
+                         lgb_predict_dose]
 
     # Get all metrics at once for each model
     metrics = [get_model_metrics(func) for func in predict_functions]

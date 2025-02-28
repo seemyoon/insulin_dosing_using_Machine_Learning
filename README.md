@@ -47,5 +47,8 @@ python -m plot_metrics.plot_metrics
 ```
 
 
-## Dataset
+## Main dataset
 Hidalgo, J. Ignacio; Alvarado, Jorge; Botella, Marta; Aramendi, Aranzazu; Velasco, J. Manuel; Garnica, Oscar (2024), “HUPA-UCM Diabetes Dataset”, Mendeley Data, V1, doi: [10.17632/3hbcscwz44.1](https://doi.org/10.17632/3hbcscwz44.1)
+
+## Additional datasets
+Khan, Murtaza (2024). Diabetes Dataset. figshare. Dataset. [10.6084/m9.figshare.27959529.v1](https://doi.org/10.6084/m9.figshare.27959529.v1)
