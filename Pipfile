@@ -28,6 +28,7 @@ xgboost = "*"
 lightgbm = "*"
 tensorflow = "*"
 keras = "*"
+shap = "*"
 
 [dev-packages]
 

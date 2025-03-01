@@ -1,8 +1,6 @@
 import os
 from pathlib import Path
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
-
 
 def load_and_prepare_data():
     # Set path to folder with data
@@ -30,6 +28,8 @@ def load_and_prepare_data():
 
     # Combine all data into one DataFrame
     data = pd.concat(data_list, ignore_index=True)
+
+    # Remove duplicates
     data.drop_duplicates(inplace=True)
 
     # Time Conversion
@@ -47,17 +47,23 @@ def load_and_prepare_data():
         data[col] = data[col].fillna(data[col].mean())
     data = data.fillna(0)
 
-    # Encode categorical variables in patient info (for clinical data)
-    le = LabelEncoder()
-    patients_info['gender_encoded'] = le.fit_transform(patients_info['gender'])
-    patients_info['treatment_encoded'] = le.fit_transform(patients_info['treatment'])
+    # Save combined data from 25 datasets
+    data.to_csv('data_processed/combined_patientID_data.csv', index=False, sep=',')
+    print('Combined data was saved as combined_data.csv')
+
+    # Merge patient clinical data with time series data by person_id
+    data = data.merge(patients_info, on='person_id', how='left')
+
+    # Save processed data
+    data.to_csv('data_processed/prepared_data_with_patient_info.csv', index=False, sep=',')
+    print('Combined data was saved as prepared_data_with_patient_info.csv')
 
     # Check for empty values in the target variable
     if data['basal_rate'].isna().sum() > 0:
         raise ValueError("Target variable 'basal_rate' contains missing values!")
 
-    # Merge patient clinical data with time series data by person_id
-    data = data.merge(patients_info, on='person_id', how='left')
+    # One-Hot Encoding for categorical variables (gender, treatment)
+    data = pd.get_dummies(data, columns=['gender', 'treatment'], drop_first=False)
 
     # Checking for gaps after merging
     if data['HbA1c'].isna().sum() > 0:
@@ -66,27 +72,15 @@ def load_and_prepare_data():
     # Output of the number of unique person_id before One-Hot Encoding
     print(f'Quantity of datasets: {data["person_id"].nunique()}')
 
-    # This code turns the person_id column into several new columns, where each unique person_id will be represented as a separate column with 0 or 1 (One-Hot Encoding).
-    # For example, if you have 3 patients with person_id 1, 2, and 3, then after applying get_dummies, 3 new columns will be created: patient_1, patient_2, patient_3.
-    # If the record belongs to patient 1, then the patient_1 column will contain 1, and the other columns will contain 0.
-    # data = pd.get_dummies(data, columns=['person_id'], prefix='patient')
-
-    # Save processed data
-    data.to_csv('data_processed/prepared_data_with_patient_info.csv', index=False, sep=',')
-    print('Data was saved as prepared_data_with_patient_info.csv')
-
     # List of features
     features = [
         'glucose', 'calories', 'heart_rate', 'steps',
         'bolus_volume_delivered', 'carb_input', 'minute', 'hour_of_day', 'month', 'day',
-        'HbA1c', 'age', 'dx_time', 'weight', 'height', 'gender_encoded', 'treatment_encoded'
+        'HbA1c', 'age', 'dx_time', 'weight', 'height'
     ]
 
-    ## Add One-Hot Encoding columns for person_id to the list of features
-    # If you don't add these columns to features, the model won't use patient information. That is, it won't know which patient each record belongs to and won't be able to take this data into account when making decisions.
-    # This can significantly worsen the quality of the model if patient information is important for predicting the target variable.
-    # This line simply adds all columns that start with patient_ to the features list. This way, the model will consider these columns as additional data, which can improve predictions.
-    features += [col for col in data.columns if col.startswith('patient_')]
+    ## Add One-Hot Encoding columns for gender and treatment
+    features += [col for col in data.columns if col.startswith('gender_') or col.startswith('treatment_')]
 
     X = data[features]
     y = data['basal_rate']

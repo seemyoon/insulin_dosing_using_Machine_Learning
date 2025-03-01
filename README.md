@@ -41,6 +41,11 @@ python -m models.svm_predict_dose
 python -m models.xgb_predict_dose
 ```
 
+### LightGBM:
+```bash
+python -m models.lgb_predict_dose
+```
+
 ### All models at once:
 ```bash
 python -m plot_metrics.plot_metrics

@@ -45,4 +45,4 @@ def predict_dose():
     return mse, r2, mae
 
 
-# predict_dose()
+predict_dose()
